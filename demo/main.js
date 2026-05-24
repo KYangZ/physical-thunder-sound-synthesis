@@ -4,22 +4,15 @@ import { LineMaterial } from "three/addons/lines/LineMaterial.js";
 import { LineSegments2 } from "three/addons/lines/LineSegments2.js";
 import { LineSegmentsGeometry } from "three/addons/lines/LineSegmentsGeometry.js";
 
-/** Placeholder lightning: main trunk + one branch (line segments in 3D). */
-const SAMPLE_LIGHTNING_SEGMENTS = [
-  // main trunk (top to ground)
-  [[0, 12, 0], [0.4, 10, 0.1]],
-  [[0.4, 10, 0.1], [-0.3, 8, -0.2]],
-  [[-0.3, 8, -0.2], [0.5, 6, 0.15]],
-  [[0.5, 6, 0.15], [-0.2, 4, -0.1]],
-  [[-0.2, 4, -0.1], [0.3, 2, 0.05]],
-  [[0.3, 2, 0.05], [0, 0, 0]],
-  // branch from mid-trunk
-  [[0.5, 6, 0.15], [1.8, 5.2, 0.6]],
-  [[1.8, 5.2, 0.6], [2.4, 3.8, 0.9]],
-];
+import {
+  DEFAULT_LIGHTNING_END,
+  DEFAULT_LIGHTNING_PARAMS,
+  DEFAULT_LIGHTNING_START,
+  generateLightningSegments,
+} from "./lightning.js";
 
 /** World-space stroke width for lightning segments (same units as geometry). */
-const LIGHTNING_LINE_WIDTH = 0.1;
+const LIGHTNING_LINE_WIDTH = 0.05;
 
 function buildLightningLines(segments, resolution) {
   const positions = [];
@@ -39,6 +32,18 @@ function buildLightningLines(segments, resolution) {
   });
 
   return new LineSegments2(geometry, material);
+}
+
+function updateLightningLines(lines, segments) {
+  const positions = [];
+  for (const [[x0, y0, z0], [x1, y1, z1]] of segments) {
+    positions.push(x0, y0, z0, x1, y1, z1);
+  }
+
+  lines.geometry.dispose();
+  const geometry = new LineSegmentsGeometry();
+  geometry.setPositions(positions);
+  lines.geometry = geometry;
 }
 
 function init() {
@@ -76,12 +81,30 @@ function init() {
   const axes = new THREE.AxesHelper(2);
   scene.add(axes);
 
+  const segments = generateLightningSegments(
+    DEFAULT_LIGHTNING_START,
+    DEFAULT_LIGHTNING_END,
+    DEFAULT_LIGHTNING_PARAMS,
+  );
   const resolution = new THREE.Vector2(
     container.clientWidth,
     container.clientHeight,
   );
-  const lightning = buildLightningLines(SAMPLE_LIGHTNING_SEGMENTS, resolution);
+  const lightning = buildLightningLines(segments, resolution);
   scene.add(lightning);
+
+  const regenerateButton = document.getElementById("regenerate");
+  regenerateButton.addEventListener("click", () => {
+    const nextSegments = generateLightningSegments(
+      DEFAULT_LIGHTNING_START,
+      DEFAULT_LIGHTNING_END,
+      {
+        ...DEFAULT_LIGHTNING_PARAMS,
+        seed: Math.floor(Math.random() * 0x7fffffff),
+      },
+    );
+    updateLightningLines(lightning, nextSegments);
+  });
 
   const groundMarker = new THREE.Mesh(
     new THREE.RingGeometry(0.35, 0.5, 32),

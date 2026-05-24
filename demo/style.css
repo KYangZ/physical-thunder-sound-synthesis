@@ -26,6 +26,24 @@ header {
   background: linear-gradient(to bottom, rgba(10, 14, 20, 0.9), transparent);
 }
 
+header button {
+  pointer-events: auto;
+  margin-top: 0.75rem;
+  padding: 0.45rem 0.85rem;
+  border: 1px solid #3a5068;
+  border-radius: 0.35rem;
+  background: rgba(20, 28, 40, 0.85);
+  color: #c8d0dc;
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+header button:hover {
+  background: rgba(30, 40, 54, 0.95);
+  border-color: #4a6078;
+}
+
 h1 {
   font-size: 1.1rem;
   font-weight: 600;
