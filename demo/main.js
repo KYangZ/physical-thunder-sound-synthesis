@@ -1,5 +1,8 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { LineMaterial } from "three/addons/lines/LineMaterial.js";
+import { LineSegments2 } from "three/addons/lines/LineSegments2.js";
+import { LineSegmentsGeometry } from "three/addons/lines/LineSegmentsGeometry.js";
 
 /** Placeholder lightning: main trunk + one branch (line segments in 3D). */
 const SAMPLE_LIGHTNING_SEGMENTS = [
@@ -15,44 +18,27 @@ const SAMPLE_LIGHTNING_SEGMENTS = [
   [[1.8, 5.2, 0.6], [2.4, 3.8, 0.9]],
 ];
 
-function buildLightningGroup(segments) {
-  const group = new THREE.Group();
-  const points = [];
+/** World-space stroke width for lightning segments (same units as geometry). */
+const LIGHTNING_LINE_WIDTH = 0.1;
+
+function buildLightningLines(segments, resolution) {
+  const positions = [];
 
   for (const [[x0, y0, z0], [x1, y1, z1]] of segments) {
-    points.push(x0, y0, z0, x1, y1, z1);
+    positions.push(x0, y0, z0, x1, y1, z1);
   }
 
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute(
-    "position",
-    new THREE.Float32BufferAttribute(points, 3),
-  );
+  const geometry = new LineSegmentsGeometry();
+  geometry.setPositions(positions);
 
-  const core = new THREE.LineSegments(
-    geometry,
-    new THREE.LineBasicMaterial({
-      color: 0xe8f4ff,
-      linewidth: 1, // ignored on most platforms; use glow mesh if thicker lines are needed
-    }),
-  );
-  group.add(core);
+  const material = new LineMaterial({
+    color: 0xe8f4ff,
+    linewidth: LIGHTNING_LINE_WIDTH,
+    worldUnits: true,
+    resolution,
+  });
 
-  // Soft outer glow (duplicate geometry, additive blend)
-  const glow = new THREE.LineSegments(
-    geometry,
-    new THREE.LineBasicMaterial({
-      color: 0x6eb8ff,
-      transparent: true,
-      opacity: 0.35,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-    }),
-  );
-  glow.scale.setScalar(1.02);
-  group.add(glow);
-
-  return group;
+  return new LineSegments2(geometry, material);
 }
 
 function init() {
@@ -90,7 +76,11 @@ function init() {
   const axes = new THREE.AxesHelper(2);
   scene.add(axes);
 
-  const lightning = buildLightningGroup(SAMPLE_LIGHTNING_SEGMENTS);
+  const resolution = new THREE.Vector2(
+    container.clientWidth,
+    container.clientHeight,
+  );
+  const lightning = buildLightningLines(SAMPLE_LIGHTNING_SEGMENTS, resolution);
   scene.add(lightning);
 
   const groundMarker = new THREE.Mesh(
@@ -112,6 +102,8 @@ function init() {
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
     renderer.setSize(w, h);
+    resolution.set(w, h);
+    lightning.material.resolution.copy(resolution);
   }
 
   window.addEventListener("resize", onResize);
