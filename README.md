@@ -1,5 +1,19 @@
 # physical-thunder-sound-synthesis
 
+Synthesize thunder from a physical lightning bolt's shape.
+
+## Web demo (lightning viewport)
+
+A small Three.js viewer lives in [`demo/`](demo/). It shows placeholder lightning geometry (line segments) in a pannable, zoomable 3D view.
+
+From the repo root, serve the folder over HTTP (ES modules need a server, not `file://`):
+
+```bash
+cd demo && python3 -m http.server 8080
+```
+
+Then open [http://localhost:8080](http://localhost:8080).
+
 ## Milestones
 1. The Physical Shape (lightning Geometry)
 Create an L system for procedural lightning generation.
