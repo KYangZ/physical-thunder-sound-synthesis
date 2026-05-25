@@ -106,18 +106,123 @@ function init() {
     updateLightningLines(lightning, nextSegments);
   });
 
-  const groundMarker = new THREE.Mesh(
+  const listener = new THREE.Group();
+  listener.position.set(-5, 0, -2);
+
+  const listenerMaterial = new THREE.MeshBasicMaterial({ color: 0x86efac });
+
+  const listenerFootprint = new THREE.Mesh(
     new THREE.RingGeometry(0.35, 0.5, 32),
     new THREE.MeshBasicMaterial({
-      color: 0x3a5068,
+      color: 0x4ade80,
       transparent: true,
-      opacity: 0.6,
+      opacity: 0.55,
       side: THREE.DoubleSide,
     }),
   );
-  groundMarker.rotation.x = -Math.PI / 2;
-  groundMarker.position.y = 0.01;
-  scene.add(groundMarker);
+  listenerFootprint.rotation.x = -Math.PI / 2;
+  listenerFootprint.position.y = 0.01;
+  listener.add(listenerFootprint);
+
+  const torsoHeight = 0.75;
+  const listenerTorso = new THREE.Mesh(
+    new THREE.ConeGeometry(0.34, torsoHeight, 4),
+    listenerMaterial,
+  );
+  listenerTorso.rotation.x = Math.PI;
+  listenerTorso.position.y = torsoHeight / 2;
+  listener.add(listenerTorso);
+
+  const headRadius = 0.2;
+  const listenerHead = new THREE.Mesh(
+    new THREE.SphereGeometry(headRadius, 16, 12),
+    listenerMaterial,
+  );
+  listenerHead.position.y = torsoHeight + headRadius;
+  listener.add(listenerHead);
+
+  const listenerHit = new THREE.Mesh(
+    new THREE.SphereGeometry(0.65, 12, 8),
+    new THREE.MeshBasicMaterial({ visible: false }),
+  );
+  listenerHit.position.y = (torsoHeight + headRadius) / 2;
+  listener.add(listenerHit);
+
+  scene.add(listener);
+
+  const listenerCoordsEl = document.getElementById("listener-coords");
+
+  function updateListenerCoordsDisplay() {
+    const { x, y, z } = listener.position;
+    listenerCoordsEl.textContent = `x: ${x.toFixed(2)}, y: ${y.toFixed(2)}, z: ${z.toFixed(2)}`;
+  }
+
+  function setListenerGroundPosition(x, z) {
+    listener.position.x = x;
+    listener.position.z = z;
+    updateListenerCoordsDisplay();
+  }
+
+  updateListenerCoordsDisplay();
+
+  const raycaster = new THREE.Raycaster();
+  const pointer = new THREE.Vector2();
+  const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  const groundHit = new THREE.Vector3();
+  let draggingListener = false;
+
+  function setPointerFromEvent(event) {
+    const rect = renderer.domElement.getBoundingClientRect();
+    pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+  }
+
+  function projectPointerOntoGround() {
+    raycaster.setFromCamera(pointer, camera);
+    return raycaster.ray.intersectPlane(groundPlane, groundHit);
+  }
+
+  function onPointerDown(event) {
+    if (event.button !== 0) return;
+    setPointerFromEvent(event);
+    raycaster.setFromCamera(pointer, camera);
+    const hits = raycaster.intersectObject(listenerHit, false);
+    if (hits.length === 0) return;
+
+    draggingListener = true;
+    controls.enabled = false;
+    renderer.domElement.setPointerCapture(event.pointerId);
+    renderer.domElement.style.cursor = "grabbing";
+    projectPointerOntoGround();
+    setListenerGroundPosition(groundHit.x, groundHit.z);
+  }
+
+  function onPointerMove(event) {
+    setPointerFromEvent(event);
+    if (draggingListener) {
+      if (projectPointerOntoGround()) {
+        setListenerGroundPosition(groundHit.x, groundHit.z);
+      }
+      return;
+    }
+
+    raycaster.setFromCamera(pointer, camera);
+    const hits = raycaster.intersectObject(listenerHit, false);
+    renderer.domElement.style.cursor = hits.length > 0 ? "grab" : "";
+  }
+
+  function onPointerUp(event) {
+    if (!draggingListener) return;
+    draggingListener = false;
+    controls.enabled = true;
+    renderer.domElement.releasePointerCapture(event.pointerId);
+    renderer.domElement.style.cursor = "";
+  }
+
+  renderer.domElement.addEventListener("pointerdown", onPointerDown);
+  renderer.domElement.addEventListener("pointermove", onPointerMove);
+  renderer.domElement.addEventListener("pointerup", onPointerUp);
+  renderer.domElement.addEventListener("pointercancel", onPointerUp);
 
   function onResize() {
     const w = container.clientWidth;
