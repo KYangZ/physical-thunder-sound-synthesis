@@ -10,6 +10,7 @@ import {
   DEFAULT_LIGHTNING_START,
   generateLightningSegments,
 } from "./lightning.js";
+import { synthesizeThunder } from "./thunder.js";
 
 /** World-space stroke width for lightning segments (same units as geometry). */
 const LIGHTNING_LINE_WIDTH = 0.05;
@@ -81,7 +82,7 @@ function init() {
   const axes = new THREE.AxesHelper(2);
   scene.add(axes);
 
-  const segments = generateLightningSegments(
+  let segments = generateLightningSegments(
     DEFAULT_LIGHTNING_START,
     DEFAULT_LIGHTNING_END,
     DEFAULT_LIGHTNING_PARAMS,
@@ -95,7 +96,7 @@ function init() {
 
   const regenerateButton = document.getElementById("regenerate");
   regenerateButton.addEventListener("click", () => {
-    const nextSegments = generateLightningSegments(
+    segments = generateLightningSegments(
       DEFAULT_LIGHTNING_START,
       DEFAULT_LIGHTNING_END,
       {
@@ -103,7 +104,87 @@ function init() {
         seed: Math.floor(Math.random() * 0x7fffffff),
       },
     );
-    updateLightningLines(lightning, nextSegments);
+    updateLightningLines(lightning, segments);
+    invalidateThunder();
+  });
+
+  const generateThunderButton = document.getElementById("generate-thunder");
+  const playThunderButton = document.getElementById("play-thunder");
+  const thunderStatusEl = document.getElementById("thunder-status");
+
+  let thunderBuffer = null;
+  let thunderSource = null;
+  const audioContext = new AudioContext();
+
+  function invalidateThunder() {
+    thunderBuffer = null;
+    playThunderButton.disabled = true;
+    thunderStatusEl.textContent = "Lightning changed — generate thunder again.";
+  }
+
+  function setThunderStatus(message) {
+    thunderStatusEl.textContent = message;
+  }
+
+  function listenerPosition() {
+    const { x, y, z } = listener.position;
+    return [x, y, z];
+  }
+
+  generateThunderButton.addEventListener("click", async () => {
+    if (thunderSource) {
+      thunderSource.stop();
+      thunderSource.disconnect();
+      thunderSource = null;
+    }
+
+    generateThunderButton.disabled = true;
+    setThunderStatus("Generating…");
+
+    const t0 = performance.now();
+    const { samples, sampleRate, duration, peak, soundStart } = synthesizeThunder(
+      segments,
+      listenerPosition(),
+    );
+    const generateMs = performance.now() - t0;
+
+    console.log(`Thunder generated in ${generateMs.toFixed(1)} ms`);
+
+    thunderBuffer = audioContext.createBuffer(1, samples.length, sampleRate);
+    thunderBuffer.getChannelData(0).set(samples);
+
+    playThunderButton.disabled = false;
+    generateThunderButton.disabled = false;
+    setThunderStatus(
+      `Ready: ${duration.toFixed(2)} s, peak ${(peak * 100).toFixed(0)}%, thunder ~${soundStart.toFixed(1)} s in (${generateMs.toFixed(0)} ms)`,
+    );
+  });
+
+  playThunderButton.addEventListener("click", async () => {
+    if (!thunderBuffer) return;
+
+    if (audioContext.state === "suspended") {
+      await audioContext.resume();
+    }
+
+    if (thunderSource) {
+      thunderSource.stop();
+      thunderSource.disconnect();
+    }
+
+    thunderSource = audioContext.createBufferSource();
+    thunderSource.buffer = thunderBuffer;
+    thunderSource.connect(audioContext.destination);
+    thunderSource.onended = () => {
+      thunderSource = null;
+      if (thunderBuffer) {
+        setThunderStatus(
+          `Ready: ${segments.length} segments, ${thunderBuffer.duration.toFixed(2)} s`,
+        );
+      }
+    };
+    thunderSource.start();
+    setThunderStatus("Playing…");
   });
 
   const listener = new THREE.Group();
@@ -161,6 +242,7 @@ function init() {
     listener.position.x = x;
     listener.position.z = z;
     updateListenerCoordsDisplay();
+    invalidateThunder();
   }
 
   updateListenerCoordsDisplay();
