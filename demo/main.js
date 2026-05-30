@@ -15,6 +15,10 @@ import { synthesizeThunder } from "./thunder.js";
 /** Lightning stroke width in meters (visible at km-scale views). */
 const LIGHTNING_LINE_WIDTH = 10;
 
+/** Ground strike point (meters). */
+const STRIKE_POINT = [0, 0, 0];
+const METERS_PER_MILE = 1609.344;
+
 /** Ground grid extent and cell size in meters. */
 const GRID_EXTENT_M = 6000;
 const GRID_CELL_M = 100;
@@ -270,7 +274,13 @@ function init() {
 
   function updateListenerCoordsDisplay() {
     const { x, y, z } = listener.position;
-    listenerCoordsEl.textContent = `Listener (m): x ${x.toFixed(0)}, y ${y.toFixed(0)}, z ${z.toFixed(0)}`;
+    const [sx, sy, sz] = STRIKE_POINT;
+    const distM = Math.hypot(x - sx, y - sy, z - sz);
+    const distKm = distM / 1000;
+    const distMi = distM / METERS_PER_MILE;
+    listenerCoordsEl.textContent =
+      `Listener (m): x ${x.toFixed(0)}, y ${y.toFixed(0)}, z ${z.toFixed(0)} · ` +
+      `${distKm.toFixed(2)} km (${distMi.toFixed(2)} mi) from strike`;
   }
 
   function setListenerGroundPosition(x, z) {

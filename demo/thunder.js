@@ -14,10 +14,17 @@ const DEFAULT_SAMPLE_RATE = 44100;
 export const DEFAULT_METERS_PER_UNIT = 1;
 
 /**
- * Fixed gain from model pressure to Web Audio levels. Unlike peak normalization,
- * this preserves relative loudness vs. listener distance (B ∝ 1/r).
+ * Strike/source intensity for the bolt. The Roy WM-wave formula gives
+ * B = sourceStrength · l² / (2·r·c·T); with sourceStrength = 1 that is the
+ * paper's normalized reference (unit N-wave strength at the channel). Raise
+ * this for a stronger discharge / higher initial overpressure.
  */
-export const DEFAULT_OUTPUT_GAIN = 40;
+export const DEFAULT_SOURCE_STRENGTH = 1;
+
+/**
+ * Web Audio playback gain (1 = passthrough). Combined with sourceStrength for level.
+ */
+export const DEFAULT_OUTPUT_GAIN = 8;
 
 function scalePoint(p, metersPerUnit) {
   return [p[0] * metersPerUnit, p[1] * metersPerUnit, p[2] * metersPerUnit];
@@ -90,7 +97,7 @@ function sinObserverAngle(normal, observer, mid) {
  * WM-wave pressure at normalized time tau (Eq. 2, Roy 1981 / AES e-Brief 640).
  * @param {number} tau - (c*t - r) / l
  * @param {number} psi - c*T/l
- * @param {number} B - l^2 / (2*r*c*T)
+ * @param {number} B - sourceStrength · l² / (2·r·c·T)
  */
 export function wmWavePressure(tau, psi, B) {
   if (psi <= 0 || psi > 1 || !Number.isFinite(tau)) return 0;
@@ -126,11 +133,12 @@ export function wmWavePressure(tau, psi, B) {
 /**
  * @param {[[number,number,number],[number,number,number]]} segment
  * @param {[number,number,number]} listener
- * @param {{ soundSpeed?: number, nWaveDuration?: number }} params
+ * @param {{ soundSpeed?: number, nWaveDuration?: number, sourceStrength?: number }} params
  */
 export function segmentWmParams(segment, listener, params = {}) {
   const c = params.soundSpeed ?? DEFAULT_SOUND_SPEED;
   const T = params.nWaveDuration ?? DEFAULT_N_WAVE_DURATION;
+  const sourceStrength = params.sourceStrength ?? DEFAULT_SOURCE_STRENGTH;
 
   const [start, end] = segment;
   const l = length(subtract(end, start));
@@ -146,7 +154,7 @@ export function segmentWmParams(segment, listener, params = {}) {
   const psi = Math.min((c * T) / l, 1 - 1e-6);
   if (psi <= 0) return null;
 
-  const B = (l * l) / (2 * r * c * T);
+  const B = (sourceStrength * l * l) / (2 * r * c * T);
   const spread = (l * sinPhi) / c;
   const tStart = r / c - T - spread;
   const tEnd = r / c + T + spread;
@@ -165,8 +173,9 @@ export function segmentWmParams(segment, listener, params = {}) {
  * @param {number} [options.sampleRate]
  * @param {number} [options.tailPadding]
  * @param {number} [options.metersPerUnit] scene units → meters
- * @param {number} [options.outputGain] fixed playback gain (not peak-normalized)
- * @returns {{ samples: Float32Array, sampleRate: number, duration: number, metersPerUnit: number, outputGain: number, peak: number, soundStart: number }}
+ * @param {number} [options.sourceStrength] bolt intensity (initial N-wave scale)
+ * @param {number} [options.outputGain] Web Audio playback gain
+ * @returns {{ samples: Float32Array, sampleRate: number, duration: number, metersPerUnit: number, sourceStrength: number, outputGain: number, rawPeak: number, peak: number, soundStart: number }}
  */
 export function synthesizeThunder(segments, listener, options = {}) {
   const c = options.soundSpeed ?? DEFAULT_SOUND_SPEED;
@@ -174,10 +183,11 @@ export function synthesizeThunder(segments, listener, options = {}) {
   const sampleRate = options.sampleRate ?? DEFAULT_SAMPLE_RATE;
   const tailPadding = options.tailPadding ?? 0.05;
   const metersPerUnit = options.metersPerUnit ?? DEFAULT_METERS_PER_UNIT;
+  const sourceStrength = options.sourceStrength ?? DEFAULT_SOURCE_STRENGTH;
   const outputGain = options.outputGain ?? DEFAULT_OUTPUT_GAIN;
 
   const listenerM = scalePoint(listener, metersPerUnit);
-  const params = { soundSpeed: c, nWaveDuration: T };
+  const params = { soundSpeed: c, nWaveDuration: T, sourceStrength };
 
   let maxEnd = 0;
   let soundStart = Infinity;
@@ -210,11 +220,18 @@ export function synthesizeThunder(segments, listener, options = {}) {
     }
   }
 
-  let peak = 0;
+  let rawPeak = 0;
   for (let i = 0; i < samples.length; i++) {
-    samples[i] *= outputGain;
     const a = Math.abs(samples[i]);
-    if (a > peak) peak = a;
+    if (a > rawPeak) rawPeak = a;
+  }
+
+  let peak = rawPeak;
+  if (outputGain !== 1) {
+    for (let i = 0; i < samples.length; i++) {
+      samples[i] *= outputGain;
+    }
+    peak *= outputGain;
   }
 
   return {
@@ -222,7 +239,9 @@ export function synthesizeThunder(segments, listener, options = {}) {
     sampleRate,
     duration,
     metersPerUnit,
+    sourceStrength,
     outputGain,
+    rawPeak,
     peak,
     soundStart,
   };
