@@ -143,16 +143,233 @@ function init() {
   });
 
   const generateThunderButton = document.getElementById("generate-thunder");
-  const playThunderButton = document.getElementById("play-thunder");
+  const thunderPlayerEl = document.getElementById("thunder-player");
+  const thunderPlayButton = document.getElementById("thunder-play");
+  const thunderTrackEl = document.getElementById("thunder-track");
+  const thunderWaveformCanvas = document.getElementById("thunder-waveform");
+  const thunderWaveformCtx = thunderWaveformCanvas.getContext("2d");
+  const thunderTimeCurrentEl = document.getElementById("thunder-time-current");
+  const thunderTimeDurationEl = document.getElementById("thunder-time-duration");
   const thunderStatusEl = document.getElementById("thunder-status");
 
   let thunderBuffer = null;
   let thunderSource = null;
+  let playbackOffset = 0;
+  let playbackStartedAt = 0;
+  let playbackRafId = null;
+  let isThunderPlaying = false;
+  let waveformPeaks = null;
   const audioContext = new AudioContext();
+
+  const WAVEFORM_COLORS = {
+    unplayed: "#3a5068",
+    played: "#60a5fa",
+    playing: "#4ade80",
+    playhead: "rgba(200, 208, 220, 0.9)",
+    center: "rgba(26, 36, 48, 0.6)",
+  };
+
+  function buildWaveformPeaks(samples, bucketCount) {
+    const peaks = new Float32Array(bucketCount);
+    const blockSize = Math.max(1, Math.floor(samples.length / bucketCount));
+    let maxPeak = 0;
+
+    for (let i = 0; i < bucketCount; i++) {
+      const start = i * blockSize;
+      const end = Math.min(start + blockSize, samples.length);
+      let peak = 0;
+      for (let j = start; j < end; j++) {
+        const abs = Math.abs(samples[j]);
+        if (abs > peak) peak = abs;
+      }
+      peaks[i] = peak;
+      if (peak > maxPeak) maxPeak = peak;
+    }
+
+    if (maxPeak > 0) {
+      for (let i = 0; i < bucketCount; i++) {
+        peaks[i] /= maxPeak;
+      }
+    }
+
+    return peaks;
+  }
+
+  function waveformBucketCount() {
+    const width = thunderTrackEl.clientWidth;
+    return Math.max(32, Math.min(512, Math.floor(width * 2)));
+  }
+
+  function resizeWaveformCanvas() {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const width = thunderTrackEl.clientWidth;
+    const height = thunderTrackEl.clientHeight;
+    if (width <= 0 || height <= 0) return;
+
+    thunderWaveformCanvas.width = Math.floor(width * dpr);
+    thunderWaveformCanvas.height = Math.floor(height * dpr);
+    thunderWaveformCanvas.style.width = `${width}px`;
+    thunderWaveformCanvas.style.height = `${height}px`;
+    thunderWaveformCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  function drawThunderWaveform(playRatio = 0) {
+    resizeWaveformCanvas();
+    const width = thunderTrackEl.clientWidth;
+    const height = thunderTrackEl.clientHeight;
+    if (width <= 0 || height <= 0) return;
+
+    const ctx = thunderWaveformCtx;
+    ctx.clearRect(0, 0, width, height);
+
+    const midY = height / 2;
+    ctx.strokeStyle = WAVEFORM_COLORS.center;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, midY);
+    ctx.lineTo(width, midY);
+    ctx.stroke();
+
+    if (!waveformPeaks || waveformPeaks.length === 0) return;
+
+    const peaks = waveformPeaks;
+    const len = peaks.length;
+    const barWidth = Math.max(1, width / len);
+    const maxAmp = height / 2 - 2;
+    const playX = playRatio * width;
+    const activeColor = isThunderPlaying
+      ? WAVEFORM_COLORS.playing
+      : WAVEFORM_COLORS.played;
+
+    for (let i = 0; i < len; i++) {
+      const x = (i / len) * width;
+      const amp = peaks[i] * maxAmp;
+      if (amp < 0.5) continue;
+
+      const barX = x + (barWidth - 1) / 2;
+      const color = x < playX ? activeColor : WAVEFORM_COLORS.unplayed;
+      ctx.fillStyle = color;
+      ctx.fillRect(barX, midY - amp, 1, amp * 2);
+    }
+
+    if (isThunderPlaying || (playRatio > 0 && playRatio <= 1)) {
+      ctx.strokeStyle = WAVEFORM_COLORS.playhead;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(playX + 0.5, 0);
+      ctx.lineTo(playX + 0.5, height);
+      ctx.stroke();
+    }
+  }
+
+  function setThunderWaveform(samples) {
+    waveformPeaks = buildWaveformPeaks(samples, waveformBucketCount());
+    drawThunderWaveform(0);
+  }
+
+  function clearThunderWaveform() {
+    waveformPeaks = null;
+    drawThunderWaveform(0);
+  }
+
+  function formatPlaybackTime(seconds) {
+    const clamped = Math.max(0, seconds);
+    const m = Math.floor(clamped / 60);
+    const s = clamped % 60;
+    return `${m}:${s.toFixed(1).padStart(4, "0")}`;
+  }
+
+  function setPlayerDisabled(disabled) {
+    thunderPlayerEl.dataset.disabled = disabled ? "true" : "false";
+    thunderPlayButton.disabled = disabled;
+    thunderTrackEl.tabIndex = disabled ? -1 : 0;
+  }
+
+  function setPlayerPlaying(playing) {
+    isThunderPlaying = playing;
+    thunderPlayerEl.dataset.playing = playing ? "true" : "false";
+    thunderPlayButton.textContent = playing ? "❚❚" : "▶";
+    thunderPlayButton.setAttribute(
+      "aria-label",
+      playing ? "Pause thunder" : "Play thunder",
+    );
+  }
+
+  function setPlaybackPosition(seconds) {
+    const duration = thunderBuffer?.duration ?? 0;
+    const clamped = Math.min(Math.max(0, seconds), duration);
+    const ratio = duration > 0 ? clamped / duration : 0;
+    thunderTrackEl.setAttribute("aria-valuenow", String(Math.round(ratio * 100)));
+    thunderTimeCurrentEl.textContent = formatPlaybackTime(clamped);
+    thunderTimeDurationEl.textContent = formatPlaybackTime(duration);
+    drawThunderWaveform(ratio);
+  }
+
+  function stopPlaybackRaf() {
+    if (playbackRafId !== null) {
+      cancelAnimationFrame(playbackRafId);
+      playbackRafId = null;
+    }
+  }
+
+  function currentPlaybackSeconds() {
+    if (!thunderBuffer) return 0;
+    if (isThunderPlaying) {
+      return (
+        playbackOffset + (audioContext.currentTime - playbackStartedAt)
+      );
+    }
+    return playbackOffset;
+  }
+
+  function tickPlayback() {
+    if (!isThunderPlaying || !thunderBuffer) return;
+    const elapsed = currentPlaybackSeconds();
+    const duration = thunderBuffer.duration;
+    if (elapsed >= duration) {
+      setPlaybackPosition(duration);
+      return;
+    }
+    setPlaybackPosition(elapsed);
+    playbackRafId = requestAnimationFrame(tickPlayback);
+  }
+
+  function stopThunderSource() {
+    if (thunderSource) {
+      thunderSource.onended = null;
+      try {
+        thunderSource.stop();
+      } catch {
+        /* already stopped */
+      }
+      thunderSource.disconnect();
+      thunderSource = null;
+    }
+    stopPlaybackRaf();
+  }
+
+  function pauseThunder() {
+    if (!isThunderPlaying) return;
+    playbackOffset = currentPlaybackSeconds();
+    stopThunderSource();
+    setPlayerPlaying(false);
+    setPlaybackPosition(playbackOffset);
+  }
+
+  function resetThunderPlayer() {
+    stopThunderSource();
+    playbackOffset = 0;
+    setPlayerPlaying(false);
+    clearThunderWaveform();
+    thunderTimeCurrentEl.textContent = formatPlaybackTime(0);
+    thunderTimeDurationEl.textContent = formatPlaybackTime(0);
+  }
 
   function invalidateThunder() {
     thunderBuffer = null;
-    playThunderButton.disabled = true;
+    waveformPeaks = null;
+    setPlayerDisabled(true);
+    resetThunderPlayer();
     thunderStatusEl.textContent = "Lightning changed — generate thunder again.";
   }
 
@@ -166,11 +383,8 @@ function init() {
   }
 
   generateThunderButton.addEventListener("click", async () => {
-    if (thunderSource) {
-      thunderSource.stop();
-      thunderSource.disconnect();
-      thunderSource = null;
-    }
+    pauseThunder();
+    setPlayerDisabled(true);
 
     generateThunderButton.disabled = true;
     setThunderStatus("Generating…");
@@ -191,40 +405,127 @@ function init() {
 
     thunderBuffer = audioContext.createBuffer(1, samples.length, sampleRate);
     thunderBuffer.getChannelData(0).set(samples);
+    setThunderWaveform(samples);
 
-    playThunderButton.disabled = false;
+    playbackOffset = 0;
+    setPlayerDisabled(false);
+    setPlayerPlaying(false);
+    setPlaybackPosition(0);
     generateThunderButton.disabled = false;
     setThunderStatus(
       `Ready: ${duration.toFixed(2)} s, peak ${(peak * 100).toFixed(0)}%, thunder ~${soundStart.toFixed(1)} s in (${generateMs.toFixed(0)} ms, ${renderSegmentCount} → ${acousticSegmentCount} acoustic segments)`,
     );
   });
 
-  playThunderButton.addEventListener("click", async () => {
+  function seekFromClientX(clientX) {
+    if (!thunderBuffer) return;
+    const rect = thunderTrackEl.getBoundingClientRect();
+    const ratio = Math.min(
+      1,
+      Math.max(0, (clientX - rect.left) / rect.width),
+    );
+    playbackOffset = ratio * thunderBuffer.duration;
+    setPlaybackPosition(playbackOffset);
+    if (isThunderPlaying) {
+      startThunderPlayback(playbackOffset);
+    }
+  }
+
+  function startThunderPlayback(offset = playbackOffset) {
+    if (!thunderBuffer) return;
+
+    stopThunderSource();
+    playbackOffset = Math.min(
+      Math.max(0, offset),
+      thunderBuffer.duration,
+    );
+
+    thunderSource = audioContext.createBufferSource();
+    thunderSource.buffer = thunderBuffer;
+    thunderSource.connect(audioContext.destination);
+    playbackStartedAt = audioContext.currentTime;
+    thunderSource.onended = () => {
+      thunderSource = null;
+      playbackOffset = 0;
+      setPlayerPlaying(false);
+      setPlaybackPosition(0);
+      if (thunderBuffer) {
+        setThunderStatus(
+          `Ready: ${thunderBuffer.duration.toFixed(2)} s`,
+        );
+      }
+    };
+    thunderSource.start(0, playbackOffset);
+    setPlayerPlaying(true);
+    setPlaybackPosition(playbackOffset);
+    setThunderStatus("Playing…");
+    tickPlayback();
+  }
+
+  thunderPlayButton.addEventListener("click", async () => {
     if (!thunderBuffer) return;
 
     if (audioContext.state === "suspended") {
       await audioContext.resume();
     }
 
-    if (thunderSource) {
-      thunderSource.stop();
-      thunderSource.disconnect();
+    if (isThunderPlaying) {
+      pauseThunder();
+      setThunderStatus(
+        `Paused at ${formatPlaybackTime(playbackOffset)} / ${formatPlaybackTime(thunderBuffer.duration)}`,
+      );
+      return;
     }
 
-    thunderSource = audioContext.createBufferSource();
-    thunderSource.buffer = thunderBuffer;
-    thunderSource.connect(audioContext.destination);
-    thunderSource.onended = () => {
-      thunderSource = null;
-      if (thunderBuffer) {
-        setThunderStatus(
-          `Ready: ${segments.length} segments, ${thunderBuffer.duration.toFixed(2)} s`,
-        );
-      }
-    };
-    thunderSource.start();
-    setThunderStatus("Playing…");
+    startThunderPlayback(playbackOffset);
   });
+
+  thunderTrackEl.addEventListener("click", (event) => {
+    if (!thunderBuffer || thunderPlayerEl.dataset.disabled === "true") {
+      return;
+    }
+    seekFromClientX(event.clientX);
+  });
+
+  thunderTrackEl.addEventListener("keydown", (event) => {
+    if (!thunderBuffer || thunderPlayerEl.dataset.disabled === "true") {
+      return;
+    }
+    const step = 0.05 * (thunderBuffer.duration || 1);
+    if (event.key === "ArrowRight") {
+      event.preventDefault();
+      playbackOffset = Math.min(
+        thunderBuffer.duration,
+        playbackOffset + step,
+      );
+      setPlaybackPosition(playbackOffset);
+      if (isThunderPlaying) startThunderPlayback(playbackOffset);
+    } else if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      playbackOffset = Math.max(0, playbackOffset - step);
+      setPlaybackPosition(playbackOffset);
+      if (isThunderPlaying) startThunderPlayback(playbackOffset);
+    } else if (event.key === " " || event.key === "Enter") {
+      event.preventDefault();
+      thunderPlayButton.click();
+    }
+  });
+
+  const waveformResizeObserver = new ResizeObserver(() => {
+    if (!waveformPeaks || !thunderBuffer) {
+      drawThunderWaveform(0);
+      return;
+    }
+    waveformPeaks = buildWaveformPeaks(
+      thunderBuffer.getChannelData(0),
+      waveformBucketCount(),
+    );
+    setPlaybackPosition(currentPlaybackSeconds());
+  });
+  waveformResizeObserver.observe(thunderTrackEl);
+
+  setPlayerDisabled(true);
+  resetThunderPlayer();
 
   const listener = new THREE.Group();
   listener.position.set(-1250, 0, -500);

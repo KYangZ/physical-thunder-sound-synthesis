@@ -17,7 +17,45 @@
       <div class="controls">
         <button type="button" id="regenerate">Regenerate lightning</button>
         <button type="button" id="generate-thunder">Generate thunder</button>
-        <button type="button" id="play-thunder" disabled>Play thunder</button>
+        <div
+          class="thunder-player"
+          id="thunder-player"
+          data-disabled="true"
+          aria-label="Thunder playback"
+        >
+          <button
+            type="button"
+            id="thunder-play"
+            class="thunder-player__play"
+            disabled
+            aria-label="Play thunder"
+          >
+            ▶
+          </button>
+          <div class="thunder-player__body">
+            <div
+              class="thunder-player__track"
+              id="thunder-track"
+              role="slider"
+              aria-valuemin="0"
+              aria-valuemax="100"
+              aria-valuenow="0"
+              aria-label="Playback position"
+              tabindex="0"
+            >
+              <canvas
+                id="thunder-waveform"
+                class="thunder-player__waveform"
+                aria-hidden="true"
+              ></canvas>
+            </div>
+            <span class="thunder-player__time" aria-live="off">
+              <span id="thunder-time-current">0:00.0</span>
+              <span class="thunder-player__sep">/</span>
+              <span id="thunder-time-duration">0:00.0</span>
+            </span>
+          </div>
+        </div>
       </div>
       <p id="thunder-status" class="hint" aria-live="polite">
         Generate thunder from the current lightning and listener position.

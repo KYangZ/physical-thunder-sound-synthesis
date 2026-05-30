@@ -27,7 +27,7 @@ export const DEFAULT_SOURCE_STRENGTH = 1;
 export const DEFAULT_OUTPUT_GAIN = 20;
 
 /** Ribner & Roy channel discretization length (m). */
-export const DEFAULT_ACOUSTIC_SEGMENT_LENGTH = 3;
+export const DEFAULT_ACOUSTIC_SEGMENT_LENGTH = 10;
 
 function scalePoint(p, metersPerUnit) {
   return [p[0] * metersPerUnit, p[1] * metersPerUnit, p[2] * metersPerUnit];
