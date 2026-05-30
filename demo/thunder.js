@@ -10,12 +10,8 @@ const DEFAULT_SOUND_SPEED = 343;
 const DEFAULT_N_WAVE_DURATION = 0.005;
 const DEFAULT_SAMPLE_RATE = 44100;
 
-/**
- * Scene units → meters. The viewport uses arbitrary units (bolt height ≈ 12);
- * Ribner–Roy timing needs real distances. 100 m/unit maps the default layout to
- * ~1.2 km channel height and ~0.5–1.3 km listener range.
- */
-export const DEFAULT_METERS_PER_UNIT = 100;
+/** Scene coordinates are meters (1 unit = 1 m). */
+export const DEFAULT_METERS_PER_UNIT = 1;
 
 /**
  * Fixed gain from model pressure to Web Audio levels. Unlike peak normalization,
