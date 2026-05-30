@@ -10,9 +10,39 @@ import {
   DEFAULT_LIGHTNING_START,
   generateLightningSegments,
 } from "./lightning.js";
+import { synthesizeThunder } from "./thunder.js";
 
-/** World-space stroke width for lightning segments (same units as geometry). */
-const LIGHTNING_LINE_WIDTH = 0.05;
+/** Lightning stroke width in meters (visible at km-scale views). */
+const LIGHTNING_LINE_WIDTH = 10;
+
+/** Ground strike point (meters). */
+const STRIKE_POINT = [0, 0, 0];
+const METERS_PER_MILE = 1609.344;
+
+/** Ground grid extent and cell size in meters. */
+const GRID_EXTENT_M = 6000;
+const GRID_CELL_M = 100;
+
+/**
+ * On-screen listener glyph scale. Base shapes below are ~human-sized (m);
+ * multiply by this for visibility at km-scale views. Acoustics use the group
+ * origin on the ground — change this without affecting thunder synthesis.
+ */
+const LISTENER_MARKER_SCALE = 150;
+
+/** Human-scale listener glyph (meters), before LISTENER_MARKER_SCALE. */
+const LISTENER_BASE = {
+  footprintInner: 0.35,
+  footprintOuter: 0.5,
+  torsoRadius: 0.34,
+  torsoHeight: 0.75,
+  headRadius: 0.2,
+  hitRadius: 0.65,
+};
+
+function listenerSize(key) {
+  return LISTENER_BASE[key] * LISTENER_MARKER_SCALE;
+}
 
 function buildLightningLines(segments, resolution) {
   const positions = [];
@@ -51,15 +81,15 @@ function init() {
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x0a0e14);
-  scene.fog = new THREE.Fog(0x0a0e14, 18, 45);
+  scene.fog = new THREE.Fog(0x0a0e14, 4500, 12000);
 
   const camera = new THREE.PerspectiveCamera(
     50,
     container.clientWidth / container.clientHeight,
-    0.1,
-    200,
+    1,
+    25000,
   );
-  camera.position.set(8, 6, 12);
+  camera.position.set(2000, 1500, 3000);
 
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -69,19 +99,24 @@ function init() {
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
   controls.dampingFactor = 0.08;
-  controls.target.set(0, 5, 0);
-  controls.minDistance = 3;
-  controls.maxDistance = 40;
+  controls.target.set(0, 1500, 0);
+  controls.minDistance = 750;
+  controls.maxDistance = 10000;
   controls.update();
 
-  const grid = new THREE.GridHelper(20, 20, 0x1e2836, 0x141c28);
+  const grid = new THREE.GridHelper(
+    GRID_EXTENT_M,
+    GRID_EXTENT_M / GRID_CELL_M,
+    0x2a3848,
+    0x141c28,
+  );
   grid.position.y = 0;
   scene.add(grid);
 
-  const axes = new THREE.AxesHelper(2);
+  const axes = new THREE.AxesHelper(500);
   scene.add(axes);
 
-  const segments = generateLightningSegments(
+  let segments = generateLightningSegments(
     DEFAULT_LIGHTNING_START,
     DEFAULT_LIGHTNING_END,
     DEFAULT_LIGHTNING_PARAMS,
@@ -95,7 +130,7 @@ function init() {
 
   const regenerateButton = document.getElementById("regenerate");
   regenerateButton.addEventListener("click", () => {
-    const nextSegments = generateLightningSegments(
+    segments = generateLightningSegments(
       DEFAULT_LIGHTNING_START,
       DEFAULT_LIGHTNING_END,
       {
@@ -103,16 +138,108 @@ function init() {
         seed: Math.floor(Math.random() * 0x7fffffff),
       },
     );
-    updateLightningLines(lightning, nextSegments);
+    updateLightningLines(lightning, segments);
+    invalidateThunder();
+  });
+
+  const generateThunderButton = document.getElementById("generate-thunder");
+  const playThunderButton = document.getElementById("play-thunder");
+  const thunderStatusEl = document.getElementById("thunder-status");
+
+  let thunderBuffer = null;
+  let thunderSource = null;
+  const audioContext = new AudioContext();
+
+  function invalidateThunder() {
+    thunderBuffer = null;
+    playThunderButton.disabled = true;
+    thunderStatusEl.textContent = "Lightning changed — generate thunder again.";
+  }
+
+  function setThunderStatus(message) {
+    thunderStatusEl.textContent = message;
+  }
+
+  function listenerPosition() {
+    const { x, y, z } = listener.position;
+    return [x, y, z];
+  }
+
+  generateThunderButton.addEventListener("click", async () => {
+    if (thunderSource) {
+      thunderSource.stop();
+      thunderSource.disconnect();
+      thunderSource = null;
+    }
+
+    generateThunderButton.disabled = true;
+    setThunderStatus("Generating…");
+
+    const t0 = performance.now();
+    const {
+      samples,
+      sampleRate,
+      duration,
+      peak,
+      soundStart,
+      renderSegmentCount,
+      acousticSegmentCount,
+    } = synthesizeThunder(segments, listenerPosition());
+    const generateMs = performance.now() - t0;
+
+    console.log(`Thunder generated in ${generateMs.toFixed(1)} ms`);
+
+    thunderBuffer = audioContext.createBuffer(1, samples.length, sampleRate);
+    thunderBuffer.getChannelData(0).set(samples);
+
+    playThunderButton.disabled = false;
+    generateThunderButton.disabled = false;
+    setThunderStatus(
+      `Ready: ${duration.toFixed(2)} s, peak ${(peak * 100).toFixed(0)}%, thunder ~${soundStart.toFixed(1)} s in (${generateMs.toFixed(0)} ms, ${renderSegmentCount} → ${acousticSegmentCount} acoustic segments)`,
+    );
+  });
+
+  playThunderButton.addEventListener("click", async () => {
+    if (!thunderBuffer) return;
+
+    if (audioContext.state === "suspended") {
+      await audioContext.resume();
+    }
+
+    if (thunderSource) {
+      thunderSource.stop();
+      thunderSource.disconnect();
+    }
+
+    thunderSource = audioContext.createBufferSource();
+    thunderSource.buffer = thunderBuffer;
+    thunderSource.connect(audioContext.destination);
+    thunderSource.onended = () => {
+      thunderSource = null;
+      if (thunderBuffer) {
+        setThunderStatus(
+          `Ready: ${segments.length} segments, ${thunderBuffer.duration.toFixed(2)} s`,
+        );
+      }
+    };
+    thunderSource.start();
+    setThunderStatus("Playing…");
   });
 
   const listener = new THREE.Group();
-  listener.position.set(-5, 0, -2);
+  listener.position.set(-1250, 0, -500);
 
   const listenerMaterial = new THREE.MeshBasicMaterial({ color: 0x86efac });
 
+  const torsoHeight = listenerSize("torsoHeight");
+  const headRadius = listenerSize("headRadius");
+
   const listenerFootprint = new THREE.Mesh(
-    new THREE.RingGeometry(0.35, 0.5, 32),
+    new THREE.RingGeometry(
+      listenerSize("footprintInner"),
+      listenerSize("footprintOuter"),
+      32,
+    ),
     new THREE.MeshBasicMaterial({
       color: 0x4ade80,
       transparent: true,
@@ -121,19 +248,17 @@ function init() {
     }),
   );
   listenerFootprint.rotation.x = -Math.PI / 2;
-  listenerFootprint.position.y = 0.01;
+  listenerFootprint.position.y = 0.5;
   listener.add(listenerFootprint);
 
-  const torsoHeight = 0.75;
   const listenerTorso = new THREE.Mesh(
-    new THREE.ConeGeometry(0.34, torsoHeight, 4),
+    new THREE.ConeGeometry(listenerSize("torsoRadius"), torsoHeight, 4),
     listenerMaterial,
   );
   listenerTorso.rotation.x = Math.PI;
   listenerTorso.position.y = torsoHeight / 2;
   listener.add(listenerTorso);
 
-  const headRadius = 0.2;
   const listenerHead = new THREE.Mesh(
     new THREE.SphereGeometry(headRadius, 16, 12),
     listenerMaterial,
@@ -142,7 +267,7 @@ function init() {
   listener.add(listenerHead);
 
   const listenerHit = new THREE.Mesh(
-    new THREE.SphereGeometry(0.65, 12, 8),
+    new THREE.SphereGeometry(listenerSize("hitRadius"), 12, 8),
     new THREE.MeshBasicMaterial({ visible: false }),
   );
   listenerHit.position.y = (torsoHeight + headRadius) / 2;
@@ -154,13 +279,20 @@ function init() {
 
   function updateListenerCoordsDisplay() {
     const { x, y, z } = listener.position;
-    listenerCoordsEl.textContent = `x: ${x.toFixed(2)}, y: ${y.toFixed(2)}, z: ${z.toFixed(2)}`;
+    const [sx, sy, sz] = STRIKE_POINT;
+    const distM = Math.hypot(x - sx, y - sy, z - sz);
+    const distKm = distM / 1000;
+    const distMi = distM / METERS_PER_MILE;
+    listenerCoordsEl.textContent =
+      `Listener (m): x ${x.toFixed(0)}, y ${y.toFixed(0)}, z ${z.toFixed(0)} · ` +
+      `${distKm.toFixed(2)} km (${distMi.toFixed(2)} mi) from strike`;
   }
 
   function setListenerGroundPosition(x, z) {
     listener.position.x = x;
     listener.position.z = z;
     updateListenerCoordsDisplay();
+    invalidateThunder();
   }
 
   updateListenerCoordsDisplay();

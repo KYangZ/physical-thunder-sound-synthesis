@@ -14,7 +14,14 @@
         drag the green listener on the ground
       </p>
       <p id="listener-coords" class="hint" aria-live="polite"></p>
-      <button type="button" id="regenerate">Regenerate lightning</button>
+      <div class="controls">
+        <button type="button" id="regenerate">Regenerate lightning</button>
+        <button type="button" id="generate-thunder">Generate thunder</button>
+        <button type="button" id="play-thunder" disabled>Play thunder</button>
+      </div>
+      <p id="thunder-status" class="hint" aria-live="polite">
+        Generate thunder from the current lightning and listener position.
+      </p>
     </header>
     <div id="viewport"></div>
     <script type="importmap">

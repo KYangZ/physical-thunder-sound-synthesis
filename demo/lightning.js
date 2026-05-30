@@ -1,6 +1,6 @@
 /**
  * Procedural lightning via midpoint displacement.
- * Returns segment pairs: [[[x0,y0,z0], [x1,y1,z1]], ...]
+ * Coordinates are meters. Returns segment pairs: [[[x0,y0,z0], [x1,y1,z1]], ...]
  */
 
 function add(a, b) {
@@ -122,11 +122,13 @@ export function generateLightningSegments(start, end, params = {}) {
   return segments;
 }
 
-export const DEFAULT_LIGHTNING_START = [0, 12, 0];
+/** Cloud base → ground strike (~3 km channel height). */
+export const DEFAULT_LIGHTNING_START = [0, 3000, 0];
 export const DEFAULT_LIGHTNING_END = [0, 0, 0];
 export const DEFAULT_LIGHTNING_PARAMS = {
   depth: 8,
-  displacement: 2,
+  /** Lateral jitter at the root segment (~17% of channel height). */
+  displacement: 500,
   displacementDecay: 0.5,
   branchProbability: 0.5,
   minBranchDepth: 3,
