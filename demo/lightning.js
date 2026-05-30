@@ -127,7 +127,6 @@ export const DEFAULT_LIGHTNING_START = [0, 3000, 0];
 export const DEFAULT_LIGHTNING_END = [0, 0, 0];
 export const DEFAULT_LIGHTNING_PARAMS = {
   depth: 8,
-  /** Lateral jitter at the root segment (~17% of channel height). */
   displacement: 500,
   displacementDecay: 0.5,
   branchProbability: 0.5,

@@ -21,6 +21,7 @@ const METERS_PER_MILE = 1609.344;
 
 /** Ground grid extent and cell size in meters. */
 const GRID_EXTENT_M = 6000;
+const GRID_HALF_EXTENT_M = GRID_EXTENT_M / 2;
 const GRID_CELL_M = 100;
 
 /**
@@ -590,8 +591,14 @@ function init() {
   }
 
   function setListenerGroundPosition(x, z) {
-    listener.position.x = x;
-    listener.position.z = z;
+    listener.position.x = Math.min(
+      GRID_HALF_EXTENT_M,
+      Math.max(-GRID_HALF_EXTENT_M, x),
+    );
+    listener.position.z = Math.min(
+      GRID_HALF_EXTENT_M,
+      Math.max(-GRID_HALF_EXTENT_M, z),
+    );
     updateListenerCoordsDisplay();
     invalidateThunder();
   }
