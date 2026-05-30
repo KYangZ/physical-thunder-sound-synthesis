@@ -24,7 +24,10 @@ export const DEFAULT_SOURCE_STRENGTH = 1;
 /**
  * Web Audio playback gain (1 = passthrough). Combined with sourceStrength for level.
  */
-export const DEFAULT_OUTPUT_GAIN = 8;
+export const DEFAULT_OUTPUT_GAIN = 20;
+
+/** Ribner & Roy channel discretization length (m). */
+export const DEFAULT_ACOUSTIC_SEGMENT_LENGTH = 3;
 
 function scalePoint(p, metersPerUnit) {
   return [p[0] * metersPerUnit, p[1] * metersPerUnit, p[2] * metersPerUnit];
@@ -60,6 +63,43 @@ function cross(a, b) {
 
 function midpoint(a, b) {
   return scale(add(a, b), 0.5);
+}
+
+function lerp(a, b, t) {
+  return add(a, scale(subtract(b, a), t));
+}
+
+/**
+ * Split render segments into ≤ maxLength m pieces for WM-wave synthesis.
+ * Visual geometry may stay coarse; acoustics uses ~3 m straight elements.
+ *
+ * @param {Array<[[number,number,number],[number,number,number]]>} segments meters
+ * @param {number} maxLength
+ */
+export function resampleSegmentsForAcoustics(segments, maxLength = DEFAULT_ACOUSTIC_SEGMENT_LENGTH) {
+  if (maxLength <= 0) return segments;
+
+  const resampled = [];
+
+  for (const [start, end] of segments) {
+    const segLen = length(subtract(end, start));
+    if (segLen < 1e-6) continue;
+
+    if (segLen <= maxLength) {
+      resampled.push([start, end]);
+      continue;
+    }
+
+    const count = Math.ceil(segLen / maxLength);
+    let prev = start;
+    for (let i = 1; i <= count; i++) {
+      const next = lerp(start, end, i / count);
+      resampled.push([prev, next]);
+      prev = next;
+    }
+  }
+
+  return resampled;
 }
 
 /** Unit normal to the segment, in the plane spanned by the segment and the observer. */
@@ -151,8 +191,9 @@ export function segmentWmParams(segment, listener, params = {}) {
   if (r < 1e-6) return null;
 
   // ψ = cT/l must be ≤ 1 for the WM-wave arcsin terms (Ribner & Roy ~3 m segments).
-  const psi = Math.min((c * T) / l, 1 - 1e-6);
-  if (psi <= 0) return null;
+  const psiRaw = (c * T) / l;
+  if (psiRaw <= 0 || psiRaw > 1) return null;
+  const psi = psiRaw;
 
   const B = (sourceStrength * l * l) / (2 * r * c * T);
   const spread = (l * sinPhi) / c;
@@ -175,7 +216,8 @@ export function segmentWmParams(segment, listener, params = {}) {
  * @param {number} [options.metersPerUnit] scene units → meters
  * @param {number} [options.sourceStrength] bolt intensity (initial N-wave scale)
  * @param {number} [options.outputGain] Web Audio playback gain
- * @returns {{ samples: Float32Array, sampleRate: number, duration: number, metersPerUnit: number, sourceStrength: number, outputGain: number, rawPeak: number, peak: number, soundStart: number }}
+ * @param {number} [options.acousticSegmentLength] max WM-wave element length (m)
+ * @returns {{ samples: Float32Array, sampleRate: number, duration: number, metersPerUnit: number, sourceStrength: number, outputGain: number, acousticSegmentLength: number, renderSegmentCount: number, acousticSegmentCount: number, rawPeak: number, peak: number, soundStart: number }}
  */
 export function synthesizeThunder(segments, listener, options = {}) {
   const c = options.soundSpeed ?? DEFAULT_SOUND_SPEED;
@@ -185,18 +227,24 @@ export function synthesizeThunder(segments, listener, options = {}) {
   const metersPerUnit = options.metersPerUnit ?? DEFAULT_METERS_PER_UNIT;
   const sourceStrength = options.sourceStrength ?? DEFAULT_SOURCE_STRENGTH;
   const outputGain = options.outputGain ?? DEFAULT_OUTPUT_GAIN;
+  const acousticSegmentLength =
+    options.acousticSegmentLength ?? DEFAULT_ACOUSTIC_SEGMENT_LENGTH;
 
   const listenerM = scalePoint(listener, metersPerUnit);
   const params = { soundSpeed: c, nWaveDuration: T, sourceStrength };
+
+  const segmentsM = segments.map(([start, end]) => [
+    scalePoint(start, metersPerUnit),
+    scalePoint(end, metersPerUnit),
+  ]);
+  const acousticSegments = resampleSegmentsForAcoustics(segmentsM, acousticSegmentLength);
 
   let maxEnd = 0;
   let soundStart = Infinity;
   const contributions = [];
 
-  for (const segment of segments) {
-    const [start, end] = segment;
-    const segmentM = [scalePoint(start, metersPerUnit), scalePoint(end, metersPerUnit)];
-    const wm = segmentWmParams(segmentM, listenerM, params);
+  for (const segment of acousticSegments) {
+    const wm = segmentWmParams(segment, listenerM, params);
     if (!wm) continue;
     maxEnd = Math.max(maxEnd, wm.tEnd);
     soundStart = Math.min(soundStart, wm.tStart);
@@ -241,6 +289,9 @@ export function synthesizeThunder(segments, listener, options = {}) {
     metersPerUnit,
     sourceStrength,
     outputGain,
+    acousticSegmentLength,
+    renderSegmentCount: segments.length,
+    acousticSegmentCount: acousticSegments.length,
     rawPeak,
     peak,
     soundStart,

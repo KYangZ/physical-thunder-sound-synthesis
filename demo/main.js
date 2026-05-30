@@ -176,10 +176,15 @@ function init() {
     setThunderStatus("Generating…");
 
     const t0 = performance.now();
-    const { samples, sampleRate, duration, peak, soundStart } = synthesizeThunder(
-      segments,
-      listenerPosition(),
-    );
+    const {
+      samples,
+      sampleRate,
+      duration,
+      peak,
+      soundStart,
+      renderSegmentCount,
+      acousticSegmentCount,
+    } = synthesizeThunder(segments, listenerPosition());
     const generateMs = performance.now() - t0;
 
     console.log(`Thunder generated in ${generateMs.toFixed(1)} ms`);
@@ -190,7 +195,7 @@ function init() {
     playThunderButton.disabled = false;
     generateThunderButton.disabled = false;
     setThunderStatus(
-      `Ready: ${duration.toFixed(2)} s, peak ${(peak * 100).toFixed(0)}%, thunder ~${soundStart.toFixed(1)} s in (${generateMs.toFixed(0)} ms)`,
+      `Ready: ${duration.toFixed(2)} s, peak ${(peak * 100).toFixed(0)}%, thunder ~${soundStart.toFixed(1)} s in (${generateMs.toFixed(0)} ms, ${renderSegmentCount} → ${acousticSegmentCount} acoustic segments)`,
     );
   });
 
